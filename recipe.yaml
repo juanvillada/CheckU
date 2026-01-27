@@ -1,5 +1,5 @@
 context:
-  version: 0.1.0
+  version: 0.1.1
 
 package:
   name: checku
@@ -7,7 +7,7 @@ package:
 
 source:
 - url: https://pypi.org/packages/source/c/checku/checku-${{ version }}.tar.gz
-  sha256: 8fc052962ede1d9c1d64f628318e815e92b979c0f9c5ac06875bc5b98f864d33
+  sha256: 70100f3ffaec0f3783b3e2c7622effd8811b076a3f8a90a33f0ed1b353354192
 
 build:
   script:
@@ -25,6 +25,8 @@ requirements:
   run:
   - python >=3.12
   - typer >=0.19.2,<0.20
+  - packaging
+  - platformdirs
   - pyhmmer >=0.12.0,<0.13
   - pandas >=2.3.3,<3
   - pyrodigal >=3.6.3.post1,<4

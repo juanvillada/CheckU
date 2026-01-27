@@ -2,7 +2,7 @@
 CheckU: UNI56 marker completeness profiling for microbial genomes.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __author__ = "Juan C. Villada"
 __email__ = "jvillada@lbl.gov"
 __title__ = "checku"

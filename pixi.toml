@@ -3,7 +3,7 @@ authors = ["Juan C. Villada <jvillada@lbl.gov>"]
 channels = ["conda-forge", "bioconda", "https://repo.prefix.dev/astrogenomics"]
 name = "checku"
 platforms = ["linux-64"]
-version = "0.1.0"
+version = "0.1.1"
 
 [tasks]
 checku = { cmd = "python -m checku --help" }
