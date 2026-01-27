@@ -1,5 +1,5 @@
 context:
-  version: 0.1.1
+  version: 0.1.2
 
 package:
   name: checku
@@ -7,7 +7,7 @@ package:
 
 source:
 - url: https://pypi.org/packages/source/c/checku/checku-${{ version }}.tar.gz
-  sha256: 66ac3aeb69751f345a562d08239afdd76d032e67c2906525a27488d4663b3d06
+  sha256: 857271f0d967b610e153a76211f8f77bbdecbbfea62729c87c55e742cdb609fd
 
 build:
   script:
