@@ -40,7 +40,7 @@ See the **Expected Results** section below for the expected output tables.
 pip install checku
 ```
 
-### Developer Install (Pixi)
+### Developer install (Pixi)
 
 If you want to download the code and develop locally:
 
@@ -50,7 +50,7 @@ cd checku
 pixi install
 ```
 
-## Quick Check
+## Quick check
 
 ```bash
 checku --help
@@ -64,20 +64,20 @@ pixi run python -m checku --help
 
 You should see the command line help without errors.
 
-## Input Rules
+## Input rules
 
 - Provide either a single FASTA file or a directory of FASTA files.
 - Protein files are used as-is. Nucleotide files trigger Pyrodigal gene calls.
 - Compressed files (`.gz`) are supported; they are unpacked into the run workspace.
 
-## Running The Pipeline
+## Running the pipeline
 
 If you are running from the repository with `Pixi`, replace `checku` below with `pixi run python -m checku`.
 
 The examples below use the bundled test data from a source checkout. Replace the
 paths with your own FASTA inputs, or run `checku test` after installation.
 
-### Pipeline Overview
+### Pipeline overview
 
 The diagram below shows the main stages executed by CheckU.
 
@@ -133,7 +133,7 @@ checku run \
 
 Use `--clean-intermediate` if you do not need the predicted protein FASTA after the run.
 
-## Custom Marker Sets
+## Custom marker sets
 
 - The default marker file ships with CheckU (UNI56).
 - Point `--hmm` to a different GA-calibrated `.hmm` file or to a directory that holds `.hmm` or `.hmm.gz` profiles.
@@ -165,7 +165,7 @@ All outputs live in the chosen `--output-dir`.
 - Use `--no-resume` to start fresh; the older checkpoint is copied aside.
 - Increase `--log-level` to `DEBUG` when you need extra detail.
 
-## Verification Step
+## Verification step
 
 Small test data sets ship with `CheckU`. After installation you can confirm the pipeline by running:
 
@@ -180,7 +180,7 @@ If you are running from the repository with `Pixi`:
 pixi run python -m checku test
 ```
 
-### Expected Results (Bundled Test Data)
+### Expected results (Bundled test data)
 
 The tables below summarize the expected `checku_summary.tsv` values for the bundled FAA and FNA test sets.
 Absolute paths are omitted for privacy.
