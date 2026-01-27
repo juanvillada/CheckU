@@ -158,6 +158,7 @@ All outputs live in the chosen `--output-dir`.
 - `details/hits/*.tsv` — raw pyhmmer hits with domain scores.
 - `checkpoint/checku_checkpoint.json` — resume data for interrupted runs.
 - `logs/checku.log` — timestamps, command line, and status messages.
+- Output tables and logs record input/output locations using absolute paths for reproducibility.
 
 ## Resume and logging
 
@@ -183,7 +184,7 @@ pixi run python -m checku test
 ### Expected results (Bundled test data)
 
 The tables below summarize the expected `checku_summary.tsv` values for the bundled FAA and FNA test sets.
-Absolute paths are omitted for privacy.
+Absolute paths (input/protein columns in the real table) are omitted for privacy.
 
 FAA (protein inputs):
 

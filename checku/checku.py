@@ -44,7 +44,7 @@ app = typer.Typer(
     context_settings={"allow_extra_args": True},
 )
 
-VERSION = "0.1.0"
+VERSION = "0.1.5"
 
 
 def _data_roots() -> List[Path]:
@@ -116,6 +116,7 @@ SUPPORTED_PROTEIN_SUFFIXES = {
 
 def configure_logging(log_level: str, log_dir: Path) -> logging.Logger:
     """Initialise console and file logging."""
+    log_dir = log_dir.expanduser().absolute()
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "checku.log"
 
@@ -125,7 +126,7 @@ def configure_logging(log_level: str, log_dir: Path) -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    logger = logging.getLogger("checku")
+    logger = logging.getLogger("CheckU")
     logger.setLevel(numeric_level)
     logger.handlers.clear()
 
@@ -419,7 +420,7 @@ class PyrodigalRunner:
             "Pyrodigal predicted %d proteins across %d contigs (%s).",
             genes_total,
             contigs,
-            fasta_path.name,
+            fasta_path,
         )
 
         return {
@@ -968,6 +969,9 @@ def _run_pipeline(
 ) -> None:
     if command_line is None:
         command_line = " ".join(shlex.quote(arg) for arg in sys.argv)
+    input_path = input_path.expanduser().absolute()
+    output_dir = output_dir.expanduser().absolute()
+    hmm_path = hmm_path.expanduser().absolute()
     config = RunConfig(
         input_path=input_path,
         output_dir=output_dir,
