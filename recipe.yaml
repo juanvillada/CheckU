@@ -7,7 +7,7 @@ package:
 
 source:
 - url: https://pypi.org/packages/source/c/checku/checku-${{ version }}.tar.gz
-  sha256: 78267778777aca8fb30dd68ddf16043f12e8ebb1c96ac2ba11d209e72a3707ef
+  sha256: b4ee79c6c86f1444d23b16a0662a50f8c59785f16db1cef9fe42bacf2c3ffb63
 
 build:
   script:
