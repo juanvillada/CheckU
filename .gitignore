@@ -162,4 +162,4 @@ cython_debug/
 .pixi/*
 !.pixi/config.toml
 tmp*
-XXXtmp*
+checku_output*

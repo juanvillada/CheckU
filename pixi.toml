@@ -1,0 +1,17 @@
+[workspace]
+authors = ["Juan C. Villada <jvillada@lbl.gov>"]
+channels = ["conda-forge", "bioconda", "https://repo.prefix.dev/astrogenomics"]
+name = "checku"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+checku = { cmd = "python -m checku --help" }
+test = { cmd = "python -m checku /global/cfs/cdirs/nelli/juan/software/checku/data/test_genomes/faa --cpus 8" }
+
+
+[dependencies]
+typer = ">=0.19.2,<0.20"
+pyhmmer = ">=0.12.0,<0.13"
+pandas = ">=2.3.3,<3"
+pyrodigal = ">=3.6.3.post1,<4"

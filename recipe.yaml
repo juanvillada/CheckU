@@ -1,0 +1,48 @@
+context:
+  version: 0.1.0
+
+package:
+  name: checku
+  version: ${{ version }}
+
+source:
+- url: https://pypi.org/packages/source/c/checku/checku-${{ version }}.tar.gz
+  sha256: 78267778777aca8fb30dd68ddf16043f12e8ebb1c96ac2ba11d209e72a3707ef
+
+build:
+  script:
+    - ${{ PYTHON }} -m pip install .
+  python:
+    entry_points:
+    - checku = checku.checku:app
+  noarch: python
+
+requirements:
+  host:
+  - python >=3.12
+  - flit >=3.2,<4
+  - pip
+  run:
+  - python >=3.12
+  - typer >=0.19.2,<0.20
+  - pyhmmer >=0.12.0,<0.13
+  - pandas >=2.3.3,<3
+  - pyrodigal >=3.6.3.post1,<4
+
+tests:
+- python:
+    imports:
+    - checku
+    pip_check: true
+
+about:
+  summary: "checku: UNI56 marker completeness profiling for microbial genomes"
+  description: |-
+    # CheckU
+
+    CheckU evaluates bacterial and archaeal genomes with the UNI56 universal
+    single-copy marker set. It reads amino acid FASTA files or nucleotide
+    assemblies, calls genes with Pyrodigal when needed, and scores markers
+    with PyHMMER. Results include completeness, contamination, and per-marker
+    hit tables.
+  license: BSD-3-Clause

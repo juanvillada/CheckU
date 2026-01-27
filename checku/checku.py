@@ -919,7 +919,7 @@ def run(
         ),
     ),
     cpus: int = typer.Option(
-        os.cpu_count() or 1,
+        1,
         "--cpus",
         "-c",
         min=1,
