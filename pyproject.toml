@@ -8,7 +8,7 @@ authors = [{ name = "Juan C. Villada", email = "jvillada@lbl.gov" }]
 readme = "README.md"
 license = { file = "LICENSE" }
 keywords = ["bioinformatics", "genome", "markers", "completeness", "microbiology", "quality"]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
@@ -16,10 +16,10 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
 ]
 dependencies = [
-    "typer>=0.19.2",
-    "pyhmmer>=0.12.0",
-    "pandas>=2.3.3",
-    "pyrodigal>=3.6.3.post1",
+    "typer>=0.19.2,<0.20",
+    "pyhmmer>=0.12.0,<0.13",
+    "pandas>=2.3.3,<3",
+    "pyrodigal>=3.6.3.post1,<4",
 ]
 dynamic = ["version", "description"]
 

@@ -4,12 +4,17 @@ CheckU evaluates bacterial and archaeal genomes with the UNI56 universal single-
 
 ## Requirements
 
-- Linux x86_64 with enough CPU and RAM for HMMER searches
 - FASTA inputs in plain or gzip form (`.faa`, `.fa`, `.fna`, and friends)
 
 ## Installation (Recommended)
 
-Install CheckU with Pixi from the curated channels:
+Make sure you have [`Pixi`](https://pixi.prefix.dev/latest/) installed:
+
+```bash
+curl -fsSL https://pixi.sh/install.sh | sh
+```
+
+Install `CheckU` with `Pixi`:
 
 ```bash
 pixi global install \
@@ -18,6 +23,16 @@ pixi global install \
   -c https://repo.prefix.dev/astrogenomics \
   checku
 ```
+
+### Quick test
+
+Small test data sets ship with `CheckU`. After installation you can confirm the pipeline by running:
+
+```bash
+checku test
+```
+
+See the **Expected Results** section below for the expected output tables.
 
 ### Alternative: pip (PyPI)
 
@@ -30,7 +45,7 @@ pip install checku
 If you want to download the code and develop locally:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/juanvillada/checku
 cd checku
 pixi install
 ```
@@ -41,7 +56,7 @@ pixi install
 checku --help
 ```
 
-If you are running from the repository with Pixi:
+If you are running from the repository with `Pixi`:
 
 ```bash
 pixi run python -m checku --help
@@ -57,7 +72,7 @@ You should see the command line help without errors.
 
 ## Running The Pipeline
 
-If you are running from the repository with Pixi, replace `checku` below with `pixi run python -m checku`.
+If you are running from the repository with `Pixi`, replace `checku` below with `pixi run python -m checku`.
 
 The examples below use the bundled test data from a source checkout. Replace the
 paths with your own FASTA inputs, or run `checku test` after installation.
@@ -88,7 +103,7 @@ graph TD
     M --> N
 ```
 
-### Single Proteome
+### Single proteome
 
 ```bash
 checku run \
@@ -97,7 +112,7 @@ checku run \
   --cpus 4
 ```
 
-### Directory Of Proteomes
+### Directory of proteomes
 
 ```bash
 checku run \
@@ -106,7 +121,7 @@ checku run \
   --cpus 8
 ```
 
-### Single Assembly
+### Single assembly
 
 ```bash
 checku run \
@@ -144,7 +159,7 @@ All outputs live in the chosen `--output-dir`.
 - `checkpoint/checku_checkpoint.json` — resume data for interrupted runs.
 - `logs/checku.log` — timestamps, command line, and status messages.
 
-## Resume And Logging
+## Resume and logging
 
 - Runs resume automatically when `--resume` is left on (default).
 - Use `--no-resume` to start fresh; the older checkpoint is copied aside.
@@ -152,7 +167,7 @@ All outputs live in the chosen `--output-dir`.
 
 ## Verification Step
 
-Small test data sets ship with CheckU. After installation you can confirm the pipeline by running:
+Small test data sets ship with `CheckU`. After installation you can confirm the pipeline by running:
 
 ```bash
 checku test
@@ -160,8 +175,7 @@ checku test
 
 The command should finish without errors and produce the summary and presence tables described above.
 
-If you are running from the repository with Pixi:
-
+If you are running from the repository with `Pixi`:
 ```bash
 pixi run python -m checku test
 ```
