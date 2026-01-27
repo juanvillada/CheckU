@@ -38,10 +38,58 @@ except ImportError as exc:  # pragma: no cover - import guard
     raise typer.Exit(1) from exc
 
 
-app = typer.Typer(help="CheckU marker completeness profiling tool.", add_completion=False)
+app = typer.Typer(
+    help="CheckU marker completeness profiling tool.",
+    add_completion=False,
+    context_settings={"allow_extra_args": True},
+)
 
 VERSION = "0.1.0"
-DEFAULT_HMM_PATH = Path(__file__).resolve().parent / "data" / "uni56.hmm"
+
+
+def _data_roots() -> List[Path]:
+    roots: List[Path] = []
+    env_root = os.environ.get("CHECKU_DATA_DIR")
+    if env_root:
+        roots.append(Path(env_root))
+    module_dir = Path(__file__).resolve().parent
+    roots.append(module_dir / "data")
+    roots.append(module_dir.parent / "data")
+
+    unique: List[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root)
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    return unique
+
+
+def _data_candidates(*parts: str) -> List[Path]:
+    return [root.joinpath(*parts) for root in _data_roots()]
+
+
+def resolve_data_path(*parts: str) -> Path:
+    candidates = _data_candidates(*parts)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def require_data_path(*parts: str) -> Path:
+    candidates = _data_candidates(*parts)
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    locations = ", ".join(str(path) for path in candidates)
+    raise FileNotFoundError(
+        f"Data resource not found: {Path(*parts)}. Looked in: {locations}"
+    )
+
+
+DEFAULT_HMM_PATH = resolve_data_path("uni56.hmm")
 CHECKPOINT_VERSION = 1
 
 SUPPORTED_NUCLEOTIDE_SUFFIXES = {
@@ -904,11 +952,48 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.command()
-def run(
-    input_path: Path = typer.Argument(..., help="FASTA file or directory to process."),
-    output_dir: Path = typer.Option(
-        Path("checku_output"), "--output-dir", "-o", help="Directory for all outputs."
+def _run_pipeline(
+    *,
+    input_path: Path,
+    output_dir: Path,
+    hmm_path: Path,
+    cpus: int,
+    resume: bool,
+    fail_fast: bool,
+    meta_mode: bool,
+    translation_table: Optional[int],
+    keep_intermediate: bool,
+    log_level: str,
+    command_line: Optional[str] = None,
+) -> None:
+    if command_line is None:
+        command_line = " ".join(shlex.quote(arg) for arg in sys.argv)
+    config = RunConfig(
+        input_path=input_path,
+        output_dir=output_dir,
+        command_line=command_line,
+        hmm_path=hmm_path,
+        cpus=cpus,
+        resume=resume,
+        fail_fast=fail_fast,
+        meta_mode=meta_mode,
+        translation_table=translation_table,
+        keep_intermediate=keep_intermediate,
+        log_level=log_level,
+    )
+
+    pipeline = CheckUPipeline(config)
+    pipeline.run()
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    output_dir: Optional[Path] = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Directory for all outputs. Defaults to output_CheckU_<DATETIME>.",
     ),
     hmm_path: Path = typer.Option(
         DEFAULT_HMM_PATH,
@@ -966,10 +1051,20 @@ def run(
     ),
 ) -> None:
     """Execute the CheckU pipeline."""
-    config = RunConfig(
+    if ctx.invoked_subcommand is not None:
+        return
+    if not ctx.args:
+        raise typer.BadParameter("Missing INPUT_PATH.")
+    if len(ctx.args) > 1:
+        raise typer.BadParameter("Only one INPUT_PATH is supported.")
+    input_path = Path(ctx.args[0])
+    if output_dir is None:
+        output_dir = Path(
+            f"output_CheckU_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        )
+    _run_pipeline(
         input_path=input_path,
         output_dir=output_dir,
-        command_line=" ".join(shlex.quote(arg) for arg in sys.argv),
         hmm_path=hmm_path,
         cpus=cpus,
         resume=resume,
@@ -980,8 +1075,170 @@ def run(
         log_level=log_level,
     )
 
-    pipeline = CheckUPipeline(config)
-    pipeline.run()
+
+@app.command()
+def run(
+    input_path: Path = typer.Argument(..., help="FASTA file or directory to process."),
+    output_dir: Optional[Path] = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Directory for all outputs. Defaults to output_CheckU_<DATETIME>.",
+    ),
+    hmm_path: Path = typer.Option(
+        DEFAULT_HMM_PATH,
+        "--hmm",
+        help=(
+            "Path to the UNI56 marker file or a directory of GA-calibrated HMMs "
+            "(defaults to bundled copy)."
+        ),
+    ),
+    cpus: int = typer.Option(
+        1,
+        "--cpus",
+        "-c",
+        min=1,
+        help="Number of CPU cores to hand over to pyhmmer.",
+    ),
+    resume: bool = typer.Option(
+        True,
+        "--resume/--no-resume",
+        help="Resume from existing checkpoint when available.",
+    ),
+    fail_fast: bool = typer.Option(
+        False,
+        "--fail-fast/--no-fail-fast",
+        help="Stop immediately when a genome fails instead of continuing.",
+    ),
+    meta_mode: bool = typer.Option(
+        True,
+        "--meta/--single",
+        help="Configure Pyrodigal to run in metagenomic mode.",
+    ),
+    translation_table: Optional[int] = typer.Option(
+        None,
+        "--translation-table",
+        "-t",
+        help="Override translation table for Pyrodigal predictions.",
+    ),
+    keep_intermediate: bool = typer.Option(
+        True,
+        "--keep-intermediate/--clean-intermediate",
+        help="Retain intermediate protein FASTA files generated by Pyrodigal.",
+    ),
+    log_level: str = typer.Option(
+        "INFO",
+        "--log-level",
+        "-l",
+        help="Logging level (DEBUG, INFO, WARNING, ERROR).",
+    ),
+) -> None:
+    """Execute the CheckU pipeline."""
+    if output_dir is None:
+        output_dir = Path(
+            f"output_CheckU_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        )
+    _run_pipeline(
+        input_path=input_path,
+        output_dir=output_dir,
+        hmm_path=hmm_path,
+        cpus=cpus,
+        resume=resume,
+        fail_fast=fail_fast,
+        meta_mode=meta_mode,
+        translation_table=translation_table,
+        keep_intermediate=keep_intermediate,
+        log_level=log_level,
+    )
+
+
+@app.command()
+def test(
+    output_dir: Optional[Path] = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help=(
+            "Directory for test outputs (FAA/FNA subfolders will be created). "
+            "Defaults to output_test_CheckU_<DATETIME>."
+        ),
+    ),
+    hmm_path: Path = typer.Option(
+        DEFAULT_HMM_PATH,
+        "--hmm",
+        help=(
+            "Path to the UNI56 marker file or a directory of GA-calibrated HMMs "
+            "(defaults to bundled copy)."
+        ),
+    ),
+    cpus: int = typer.Option(
+        1,
+        "--cpus",
+        "-c",
+        min=1,
+        help="Number of CPU cores to hand over to pyhmmer.",
+    ),
+    resume: bool = typer.Option(
+        True,
+        "--resume/--no-resume",
+        help="Resume from existing checkpoint when available.",
+    ),
+    fail_fast: bool = typer.Option(
+        False,
+        "--fail-fast/--no-fail-fast",
+        help="Stop immediately when a genome fails instead of continuing.",
+    ),
+    meta_mode: bool = typer.Option(
+        True,
+        "--meta/--single",
+        help="Configure Pyrodigal to run in metagenomic mode.",
+    ),
+    translation_table: Optional[int] = typer.Option(
+        None,
+        "--translation-table",
+        "-t",
+        help="Override translation table for Pyrodigal predictions.",
+    ),
+    keep_intermediate: bool = typer.Option(
+        True,
+        "--keep-intermediate/--clean-intermediate",
+        help="Retain intermediate protein FASTA files generated by Pyrodigal.",
+    ),
+    log_level: str = typer.Option(
+        "INFO",
+        "--log-level",
+        "-l",
+        help="Logging level (DEBUG, INFO, WARNING, ERROR).",
+    ),
+) -> None:
+    """Run CheckU against bundled FAA and FNA test genomes."""
+    test_root = require_data_path("test_genomes")
+    if not test_root.is_dir():
+        raise NotADirectoryError(f"Test dataset path is not a directory: {test_root}")
+    if output_dir is None:
+        output_dir = Path(
+            f"output_test_CheckU_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        )
+    cases = [
+        ("faa", test_root / "faa"),
+        ("fna", test_root / "fna"),
+    ]
+    for label, case_path in cases:
+        if not case_path.exists():
+            raise FileNotFoundError(f"Test dataset not found: {case_path}")
+        _run_pipeline(
+            input_path=case_path,
+            output_dir=output_dir / label,
+            hmm_path=hmm_path,
+            cpus=cpus,
+            resume=resume,
+            fail_fast=fail_fast,
+            meta_mode=meta_mode,
+            translation_table=translation_table,
+            keep_intermediate=keep_intermediate,
+            log_level=log_level,
+            command_line=" ".join(shlex.quote(arg) for arg in sys.argv),
+        )
 
 
 if __name__ == "__main__":

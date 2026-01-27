@@ -7,7 +7,7 @@ version = "0.1.2"
 
 [tasks]
 checku = { cmd = "python -m checku --help" }
-test = { cmd = "python -m checku /global/cfs/cdirs/nelli/juan/software/checku/data/test_genomes/faa --cpus 8" }
+test = { cmd = "python -m checku test --cpus 8" }
 
 
 [dependencies]

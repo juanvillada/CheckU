@@ -7,17 +7,31 @@ CheckU evaluates bacterial and archaeal genomes with the UNI56 universal single-
 - Linux x86_64 with enough CPU and RAM for HMMER searches
 - FASTA inputs in plain or gzip form (`.faa`, `.fa`, `.fna`, and friends)
 
-## Installation
+## Installation (Recommended)
 
-### Option 1: pip (PyPI)
+Install CheckU with Pixi from the curated channels:
+
+```bash
+pixi global install \
+  -c conda-forge \
+  -c bioconda \
+  -c https://repo.prefix.dev/astrogenomics \
+  checku
+```
+
+### Alternative: pip (PyPI)
 
 ```bash
 pip install checku
 ```
 
-### Option 2: Pixi (development)
+### Developer Install (Pixi)
+
+If you want to download the code and develop locally:
 
 ```bash
+git clone <repo-url>
+cd checku
 pixi install
 ```
 
@@ -44,6 +58,9 @@ You should see the command line help without errors.
 ## Running The Pipeline
 
 If you are running from the repository with Pixi, replace `checku` below with `pixi run python -m checku`.
+
+The examples below use the bundled test data from a source checkout. Replace the
+paths with your own FASTA inputs, or run `checku test` after installation.
 
 ### Pipeline Overview
 
@@ -75,7 +92,7 @@ graph TD
 
 ```bash
 checku run \
-  data/test_genomes/faa/IMGI2140918011.faa \
+  checku/data/test_genomes/faa/IMGI2140918011.faa \
   --output-dir tmp/proteome_example \
   --cpus 4
 ```
@@ -84,7 +101,7 @@ checku run \
 
 ```bash
 checku run \
-  data/test_genomes/faa \
+  checku/data/test_genomes/faa \
   --output-dir tmp/proteome_batch \
   --cpus 8
 ```
@@ -93,7 +110,7 @@ checku run \
 
 ```bash
 checku run \
-  data/test_genomes/fna/IMG2140918011.fna \
+  checku/data/test_genomes/fna/IMG2140918011.fna \
   --output-dir tmp/assembly_example \
   --cpus 4 \
   --clean-intermediate
@@ -135,10 +152,47 @@ All outputs live in the chosen `--output-dir`.
 
 ## Verification Step
 
-Small test data sets are stored under `data/test_genomes/`. After installation you can confirm the pipeline by running:
+Small test data sets ship with CheckU. After installation you can confirm the pipeline by running:
 
 ```bash
-checku run data/test_genomes/faa --output-dir tmp/test_run --cpus 2
+checku test
 ```
 
 The command should finish without errors and produce the summary and presence tables described above.
+
+If you are running from the repository with Pixi:
+
+```bash
+pixi run python -m checku test
+```
+
+### Expected Results (Bundled Test Data)
+
+The tables below summarize the expected `checku_summary.tsv` values for the bundled FAA and FNA test sets.
+Absolute paths are omitted for privacy.
+
+FAA (protein inputs):
+
+| genome_id | markers_detected | completeness | duplicated_markers | contamination |
+| --- | --- | --- | --- | --- |
+| IMGI2140918011 | 55 | 98.21 | 0 | 0.0 |
+| IMGI2645727657 | 56 | 100.0 | 0 | 0.0 |
+| IMGI651324087 | 56 | 100.0 | 0 | 0.0 |
+| IMGM3300027739_BIN74 | 36 | 64.29 | 0 | 0.0 |
+| SCISO2808607008 | 55 | 98.21 | 1 | 1.79 |
+| SDISOGCA_003484685.1 | 47 | 83.93 | 1 | 1.79 |
+| SHISO2654587767 | 55 | 98.21 | 1 | 1.79 |
+| SLISOGCF_900639865.1 | 56 | 100.0 | 1 | 1.79 |
+| SRISO640427127 | 52 | 92.86 | 0 | 0.0 |
+| SXGCA_000019745.1 | 55 | 98.21 | 0 | 0.0 |
+| SXGCA_902860225.1_Azoamicus_ciliaticola | 51 | 91.07 | 0 | 0.0 |
+| SXISO642555114 | 54 | 96.43 | 1 | 1.79 |
+
+FNA (nucleotide inputs with Pyrodigal):
+
+| genome_id | markers_detected | completeness | duplicated_markers | contamination | pyrodigal_genes | pyrodigal_contigs |
+| --- | --- | --- | --- | --- | --- | --- |
+| IMG2140918011 | 56 | 100.0 | 0 | 0.0 | 2974 | 78 |
+| IMG2645727657 | 56 | 100.0 | 0 | 0.0 | 1516 | 1 |
+| IMG2645727657_HALF | 46 | 82.14 | 0 | 0.0 | 821 | 1 |
+| IMG651324087 | 56 | 100.0 | 0 | 0.0 | 2572 | 73 |
