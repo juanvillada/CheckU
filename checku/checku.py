@@ -44,7 +44,7 @@ app = typer.Typer(
     context_settings={"allow_extra_args": True},
 )
 
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 
 
 def _data_roots() -> List[Path]:
