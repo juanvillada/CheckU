@@ -254,31 +254,31 @@ pixi run python -m checku test
 The tables below summarize the expected `checku_summary.tsv` values for the bundled FAA and FNA test sets.
 Absolute paths (input/protein columns in the real table) are omitted for privacy.
 
-The real output table also includes `completeness_calibrated`, `calibration_domain`,
-`calibration_taxonomy_group`, `calibration_checku_bin`, and `calibration_n_train`.
+The real output table also includes `calibration_domain`, `calibration_taxonomy_group`,
+`calibration_checku_bin`, and `calibration_n_train`.
 
 FAA (protein inputs):
 
-| genome_id | markers_detected | completeness | duplicated_markers | contamination |
-| --- | --- | --- | --- | --- |
-| IMGI2140918011 | 55 | 98.21 | 0 | 0.0 |
-| IMGI2645727657 | 56 | 100.0 | 0 | 0.0 |
-| IMGI651324087 | 56 | 100.0 | 0 | 0.0 |
-| IMGM3300027739_BIN74 | 36 | 64.29 | 0 | 0.0 |
-| SCISO2808607008 | 55 | 98.21 | 1 | 1.79 |
-| SDISOGCA_003484685.1 | 47 | 83.93 | 1 | 1.79 |
-| SHISO2654587767 | 55 | 98.21 | 1 | 1.79 |
-| SLISOGCF_900639865.1 | 56 | 100.0 | 1 | 1.79 |
-| SRISO640427127 | 52 | 92.86 | 0 | 0.0 |
-| SXGCA_000019745.1 | 55 | 98.21 | 0 | 0.0 |
-| SXGCA_902860225.1_Azoamicus_ciliaticola | 51 | 91.07 | 0 | 0.0 |
-| SXISO642555114 | 54 | 96.43 | 1 | 1.79 |
+| genome_id | markers_detected | completeness | completeness_calibrated | duplicated_markers | contamination |
+| --- | --- | --- | --- | --- | --- |
+| IMGI2140918011 | 55 | 98.21 | 89.20 | 0 | 0.00 |
+| IMGI2645727657 | 56 | 100.00 | 89.09 | 0 | 0.00 |
+| IMGI651324087 | 56 | 100.00 | 89.09 | 0 | 0.00 |
+| IMGM3300027739_BIN74 | 36 | 64.29 | 57.07 | 0 | 0.00 |
+| SCISO2808607008 | 55 | 98.21 | 89.20 | 1 | 1.79 |
+| SDISOGCA_003484685.1 | 47 | 83.93 | 70.34 | 1 | 1.79 |
+| SHISO2654587767 | 55 | 98.21 | 89.20 | 1 | 1.79 |
+| SLISOGCF_900639865.1 | 56 | 100.00 | 89.09 | 1 | 1.79 |
+| SRISO640427127 | 52 | 92.86 | 81.67 | 0 | 0.00 |
+| SXGCA_000019745.1 | 55 | 98.21 | 89.20 | 0 | 0.00 |
+| SXGCA_902860225.1_Azoamicus_ciliaticola | 51 | 91.07 | 79.88 | 0 | 0.00 |
+| SXISO642555114 | 54 | 96.43 | 87.42 | 1 | 1.79 |
 
 FNA (nucleotide inputs with Pyrodigal):
 
-| genome_id | markers_detected | completeness | duplicated_markers | contamination | pyrodigal_genes | pyrodigal_contigs |
-| --- | --- | --- | --- | --- | --- | --- |
-| IMG2140918011 | 56 | 100.0 | 0 | 0.0 | 2974 | 78 |
-| IMG2645727657 | 56 | 100.0 | 0 | 0.0 | 1516 | 1 |
-| IMG2645727657_HALF | 46 | 82.14 | 0 | 0.0 | 821 | 1 |
-| IMG651324087 | 56 | 100.0 | 0 | 0.0 | 2572 | 73 |
+| genome_id | markers_detected | completeness | completeness_calibrated | duplicated_markers | contamination | pyrodigal_genes | pyrodigal_contigs |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| IMG2140918011 | 56 | 100.00 | 89.09 | 0 | 0.00 | 2974 | 78 |
+| IMG2645727657 | 56 | 100.00 | 89.09 | 0 | 0.00 | 1516 | 1 |
+| IMG2645727657_HALF | 46 | 82.14 | 68.55 | 0 | 0.00 | 821 | 1 |
+| IMG651324087 | 56 | 100.00 | 89.09 | 0 | 0.00 | 2572 | 73 |
