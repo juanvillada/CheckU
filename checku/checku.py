@@ -26,6 +26,8 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import typer
 
+from .calibration import CalibrationMetadata, CalibrationTable
+
 try:
     import pyhmmer
 except ImportError as exc:  # pragma: no cover - import guard
@@ -44,7 +46,7 @@ app = typer.Typer(
     context_settings={"allow_extra_args": True},
 )
 
-VERSION = "0.1.7"
+VERSION = "0.1.9"
 
 
 def _data_roots() -> List[Path]:
@@ -90,7 +92,8 @@ def require_data_path(*parts: str) -> Path:
 
 
 DEFAULT_HMM_PATH = resolve_data_path("uni56.hmm")
-CHECKPOINT_VERSION = 1
+DEFAULT_CALIBRATION_PATH = resolve_data_path("checku_calibration.tsv")
+CHECKPOINT_VERSION = 2
 
 SUPPORTED_NUCLEOTIDE_SUFFIXES = {
     ".fa",
@@ -247,8 +250,13 @@ class GenomeResult:
     markers_total: int
     markers_detected: int
     completeness: float
+    completeness_calibrated: Optional[float]
     duplicated_markers: int
     contamination: float
+    calibration_domain: str = ""
+    calibration_taxonomy_group: str = ""
+    calibration_checku_bin: str = ""
+    calibration_n_train: Optional[int] = None
     marker_summaries: Dict[str, MarkerSummary] = field(default_factory=dict)
     raw_hits_path: Optional[str] = None
     pyrodigal: Optional[Dict[str, object]] = None
@@ -262,8 +270,13 @@ class GenomeResult:
             "markers_total": self.markers_total,
             "markers_detected": self.markers_detected,
             "completeness": self.completeness,
+            "completeness_calibrated": self.completeness_calibrated,
             "duplicated_markers": self.duplicated_markers,
             "contamination": self.contamination,
+            "calibration_domain": self.calibration_domain,
+            "calibration_taxonomy_group": self.calibration_taxonomy_group,
+            "calibration_checku_bin": self.calibration_checku_bin,
+            "calibration_n_train": self.calibration_n_train,
             "marker_summaries": {
                 key: summary.to_dict() for key, summary in self.marker_summaries.items()
             },
@@ -285,8 +298,21 @@ class GenomeResult:
             markers_total=int(data.get("markers_total", 0)),
             markers_detected=int(data.get("markers_detected", 0)),
             completeness=float(data.get("completeness", 0.0)),
+            completeness_calibrated=(
+                float(data["completeness_calibrated"])
+                if data.get("completeness_calibrated") not in {None, ""}
+                else None
+            ),
             duplicated_markers=int(data.get("duplicated_markers", 0)),
             contamination=float(data.get("contamination", 0.0)),
+            calibration_domain=str(data.get("calibration_domain", "")),
+            calibration_taxonomy_group=str(data.get("calibration_taxonomy_group", "")),
+            calibration_checku_bin=str(data.get("calibration_checku_bin", "")),
+            calibration_n_train=(
+                int(data["calibration_n_train"])
+                if data.get("calibration_n_train") not in {None, ""}
+                else None
+            ),
             marker_summaries=marker_summaries,
             raw_hits_path=data.get("raw_hits_path"),
             pyrodigal=data.get("pyrodigal"),
@@ -614,6 +640,8 @@ class RunConfig:
     output_dir: Path
     command_line: str
     hmm_path: Path
+    calibration_path: Path
+    calibration_metadata_path: Optional[Path]
     cpus: int
     resume: bool
     fail_fast: bool
@@ -644,6 +672,10 @@ class CheckUPipeline:
         self.summary_path = config.output_dir / "checku_summary.tsv"
 
         self.pyhmmer_runner = PyhmmerRunner(config.hmm_path, config.cpus, self.logger)
+        self.calibration_table = CalibrationTable(config.calibration_path, self.logger)
+        self.calibration_metadata = CalibrationMetadata(
+            config.calibration_metadata_path, self.logger
+        )
         self.marker_order = self.pyhmmer_runner.marker_order
         self.logger.info(
             "Marker source (%s): %s (%s) (%d profiles with GA thresholds).",
@@ -734,8 +766,19 @@ class CheckUPipeline:
                 "markers_total": result.markers_total,
                 "markers_detected": result.markers_detected,
                 "completeness": round(result.completeness, 2),
+                "completeness_calibrated": (
+                    round(result.completeness_calibrated, 2)
+                    if result.completeness_calibrated is not None
+                    else ""
+                ),
                 "duplicated_markers": result.duplicated_markers,
                 "contamination": round(result.contamination, 2),
+                "calibration_domain": result.calibration_domain,
+                "calibration_taxonomy_group": result.calibration_taxonomy_group,
+                "calibration_checku_bin": result.calibration_checku_bin,
+                "calibration_n_train": (
+                    result.calibration_n_train if result.calibration_n_train is not None else ""
+                ),
             }
             for marker in self.marker_order:
                 summary = result.marker_summaries.get(marker)
@@ -756,8 +799,13 @@ class CheckUPipeline:
             "markers_total",
             "markers_detected",
             "completeness",
+            "completeness_calibrated",
             "duplicated_markers",
             "contamination",
+            "calibration_domain",
+            "calibration_taxonomy_group",
+            "calibration_checku_bin",
+            "calibration_n_train",
         ]
 
         with open(presence_path, "w", encoding="utf-8", newline="") as handle:
@@ -778,8 +826,13 @@ class CheckUPipeline:
                     "markers_total",
                     "markers_detected",
                     "completeness",
+                    "completeness_calibrated",
                     "duplicated_markers",
                     "contamination",
+                    "calibration_domain",
+                    "calibration_taxonomy_group",
+                    "calibration_checku_bin",
+                    "calibration_n_train",
                     "pyrodigal_genes",
                     "pyrodigal_contigs",
                 ]
@@ -797,8 +850,21 @@ class CheckUPipeline:
                         result.markers_total,
                         result.markers_detected,
                         round(result.completeness, 2),
+                        (
+                            round(result.completeness_calibrated, 2)
+                            if result.completeness_calibrated is not None
+                            else ""
+                        ),
                         result.duplicated_markers,
                         round(result.contamination, 2),
+                        result.calibration_domain,
+                        result.calibration_taxonomy_group,
+                        result.calibration_checku_bin,
+                        (
+                            result.calibration_n_train
+                            if result.calibration_n_train is not None
+                            else ""
+                        ),
                         pyrodigal_info.get("genes", ""),
                         pyrodigal_info.get("contigs", ""),
                     ]
@@ -879,6 +945,10 @@ class CheckUPipeline:
                 if self.marker_order
                 else 0.0
             )
+            calibrated_completeness, calibration_info = self.calibration_table.apply(
+                round(completeness, 2),
+                self.calibration_metadata.lookup(genome_id),
+            )
 
             raw_hits_path: Optional[str] = None
             if raw_hits:
@@ -893,8 +963,25 @@ class CheckUPipeline:
                 markers_total=marker_total,
                 markers_detected=markers_detected,
                 completeness=round(completeness, 2),
+                completeness_calibrated=(
+                    round(calibrated_completeness, 2)
+                    if calibrated_completeness is not None
+                    else None
+                ),
                 duplicated_markers=duplicated_markers,
                 contamination=round(contamination, 2),
+                calibration_domain=(
+                    "" if calibration_info is None else str(calibration_info["key"][0])
+                ),
+                calibration_taxonomy_group=(
+                    "" if calibration_info is None else str(calibration_info["key"][1])
+                ),
+                calibration_checku_bin=(
+                    "" if calibration_info is None else str(calibration_info["key"][2])
+                ),
+                calibration_n_train=(
+                    None if calibration_info is None else int(calibration_info["n_samples"])
+                ),
                 marker_summaries=marker_hits,
                 raw_hits_path=raw_hits_path,
                 pyrodigal=pyrodigal_info,
@@ -902,11 +989,16 @@ class CheckUPipeline:
 
             self.checkpoint.record_success(result)
             self.logger.info(
-                "%s: %d/%d markers detected (%.2f%% completeness, %d duplicates, %.2f%% contamination).",
+                "%s: %d/%d markers detected (%.2f%% raw completeness, %.2f%% calibrated completeness, %d duplicates, %.2f%% contamination).",
                 genome_id,
                 markers_detected,
                 marker_total,
                 result.completeness,
+                (
+                    result.completeness_calibrated
+                    if result.completeness_calibrated is not None
+                    else result.completeness
+                ),
                 duplicated_markers,
                 result.contamination,
             )
@@ -958,6 +1050,8 @@ def _run_pipeline(
     input_path: Path,
     output_dir: Path,
     hmm_path: Path,
+    calibration_path: Path,
+    calibration_metadata_path: Optional[Path],
     cpus: int,
     resume: bool,
     fail_fast: bool,
@@ -972,11 +1066,16 @@ def _run_pipeline(
     input_path = input_path.expanduser().absolute()
     output_dir = output_dir.expanduser().absolute()
     hmm_path = hmm_path.expanduser().absolute()
+    calibration_path = calibration_path.expanduser().absolute()
+    if calibration_metadata_path is not None:
+        calibration_metadata_path = calibration_metadata_path.expanduser().absolute()
     config = RunConfig(
         input_path=input_path,
         output_dir=output_dir,
         command_line=command_line,
         hmm_path=hmm_path,
+        calibration_path=calibration_path,
+        calibration_metadata_path=calibration_metadata_path,
         cpus=cpus,
         resume=resume,
         fail_fast=fail_fast,
@@ -1005,6 +1104,22 @@ def main(
         help=(
             "Path to the UNI56 marker file or a directory of GA-calibrated HMMs "
             "(defaults to bundled copy)."
+        ),
+    ),
+    calibration_path: Path = typer.Option(
+        DEFAULT_CALIBRATION_PATH,
+        "--calibration-table",
+        help=(
+            "Path to the CheckU-Cal residual table (defaults to the bundled "
+            "manuscript-derived calibration table)."
+        ),
+    ),
+    calibration_metadata_path: Optional[Path] = typer.Option(
+        None,
+        "--calibration-metadata",
+        help=(
+            "Optional TSV/CSV with genome_id plus domain and/or taxonomy_group "
+            "columns to refine CheckU-Cal beyond the global fallback."
         ),
     ),
     cpus: int = typer.Option(
@@ -1070,6 +1185,8 @@ def main(
         input_path=input_path,
         output_dir=output_dir,
         hmm_path=hmm_path,
+        calibration_path=calibration_path,
+        calibration_metadata_path=calibration_metadata_path,
         cpus=cpus,
         resume=resume,
         fail_fast=fail_fast,
@@ -1095,6 +1212,22 @@ def run(
         help=(
             "Path to the UNI56 marker file or a directory of GA-calibrated HMMs "
             "(defaults to bundled copy)."
+        ),
+    ),
+    calibration_path: Path = typer.Option(
+        DEFAULT_CALIBRATION_PATH,
+        "--calibration-table",
+        help=(
+            "Path to the CheckU-Cal residual table (defaults to the bundled "
+            "manuscript-derived calibration table)."
+        ),
+    ),
+    calibration_metadata_path: Optional[Path] = typer.Option(
+        None,
+        "--calibration-metadata",
+        help=(
+            "Optional TSV/CSV with genome_id plus domain and/or taxonomy_group "
+            "columns to refine CheckU-Cal beyond the global fallback."
         ),
     ),
     cpus: int = typer.Option(
@@ -1146,6 +1279,8 @@ def run(
         input_path=input_path,
         output_dir=output_dir,
         hmm_path=hmm_path,
+        calibration_path=calibration_path,
+        calibration_metadata_path=calibration_metadata_path,
         cpus=cpus,
         resume=resume,
         fail_fast=fail_fast,
@@ -1173,6 +1308,14 @@ def test(
         help=(
             "Path to the UNI56 marker file or a directory of GA-calibrated HMMs "
             "(defaults to bundled copy)."
+        ),
+    ),
+    calibration_path: Path = typer.Option(
+        DEFAULT_CALIBRATION_PATH,
+        "--calibration-table",
+        help=(
+            "Path to the CheckU-Cal residual table (defaults to the bundled "
+            "manuscript-derived calibration table)."
         ),
     ),
     cpus: int = typer.Option(
@@ -1234,6 +1377,8 @@ def test(
             input_path=case_path,
             output_dir=output_dir / label,
             hmm_path=hmm_path,
+            calibration_path=calibration_path,
+            calibration_metadata_path=None,
             cpus=cpus,
             resume=resume,
             fail_fast=fail_fast,

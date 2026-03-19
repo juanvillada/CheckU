@@ -1,6 +1,6 @@
 # CheckU
 
-CheckU evaluates bacterial and archaeal genomes with the UNI56 universal single-copy marker set. The program reads amino acid FASTA files or nucleotide assemblies, calls genes with Pyrodigal when needed, and scores markers with PyHMMER. Results include completeness, contamination, and per-marker hit tables.
+CheckU evaluates bacterial and archaeal genomes with the UNI56 universal single-copy marker set. The program reads amino acid FASTA files or nucleotide assemblies, calls genes with Pyrodigal when needed, and scores markers with PyHMMER. Results include raw completeness, calibrated completeness, contamination, and per-marker hit tables.
 
 ## Requirements
 
@@ -133,6 +133,74 @@ checku run \
 
 Use `--clean-intermediate` if you do not need the predicted protein FASTA after the run.
 
+## CheckU-Cal output
+
+Every `checku_summary.tsv` now contains both:
+
+- `completeness` — the raw UNI56 marker fraction (`markers_detected / 56 * 100`)
+- `completeness_calibrated` — a bundled residual-corrected estimate (`CheckU-Cal`)
+
+The bundled calibration table is used automatically. If you have genome-level metadata available, you can refine the lookup with:
+
+- `--calibration-metadata <metadata.tsv>` — optional TSV/CSV with `genome_id` plus either `taxonomy_group` or GTDB fields such as `classification_gtdbtk`, `gtdbtk_domain`, and `gtdbtk_phylum`
+- `--calibration-table <table.tsv>` — override the bundled manuscript-derived calibration table
+
+When GTDB-style phylum metadata are provided, CheckU-Cal now uses exact phylum-specific residual tables where the shredded benchmark supports them. If an exact phylum/bin combination is too sparse, CheckU falls back to a coarse phylum grouping and then to domain-wide/global residual tables. This keeps the software-facing calibration more specific than the manuscript display groups while retaining safe fallbacks for poorly represented taxa.
+
+### Calibration metadata template
+
+The `genome_id` column must match the CheckU genome identifier, which is derived from the input filename stem. For example, `bin_001.fna.gz` becomes `bin_001`.
+
+Minimal example:
+
+```tsv
+genome_id	gtdbtk_domain	gtdbtk_phylum	classification_gtdbtk
+bin_001	d__Bacteria	p__Planctomycetota	d__Bacteria;p__Planctomycetota;c__Planctomycetes;o__Planctomycetales;f__Planctomycetaceae;g__Planctomyces;s__
+bin_002	d__Archaea	p__Thermoproteota	d__Archaea;p__Thermoproteota;c__Nitrososphaeria;o__Nitrososphaerales;f__Nitrososphaeraceae;g__Nitrososphaera;s__
+bin_003	d__Bacteria	p__Bacillota_A	d__Bacteria;p__Bacillota_A;c__Clostridia;o__Eubacteriales;f__Lachnospiraceae;g__Roseburia;s__
+```
+
+If you already maintain a curated calibration stratum, you can also provide `taxonomy_group` directly:
+
+```tsv
+genome_id	domain	taxonomy_group
+bin_001	Bacteria	Planctomycetota
+bin_002	Archaea	Thermoproteota
+bin_003	Bacteria	Bacillota_A
+```
+
+Accepted metadata columns:
+
+- genome id: `genome_id`, `record_id`, `taxon_oid`, `genome`, `name`
+- domain: `domain`, `gtdbtk_domain`, `gtdb_domain`
+- taxonomy group: `taxonomy_group`
+- phylum: `gtdbtk_phylum`, `gtdbtk__phylum`, `gtdb_phylum`, `phylum_gtdb`, `phylum`
+- full GTDB classification: `classification_gtdbtk`, `classification`, `gtdb_classification`, `gtdb_taxonomy`
+
+Resolution order:
+
+1. Use `taxonomy_group` directly if provided.
+2. Otherwise derive the exact phylum from the phylum or GTDB classification fields.
+3. If that exact phylum is not represented in the calibration table for the relevant completeness bin, fall back to the coarser group.
+4. If taxonomy is absent or unsupported, fall back to domain-wide and then global calibration.
+
+Example run with metadata:
+
+```bash
+checku run \
+  /path/to/mags \
+  --calibration-metadata metadata.tsv \
+  --output-dir tmp/checku_with_calibration \
+  --cpus 8
+```
+
+The summary and presence tables also report the calibration provenance:
+
+- `calibration_domain`
+- `calibration_taxonomy_group`
+- `calibration_checku_bin`
+- `calibration_n_train`
+
 ## Custom marker sets
 
 - The default marker file ships with CheckU (UNI56).
@@ -153,7 +221,7 @@ checku run \
 
 All outputs live in the chosen `--output-dir`.
 
-- `checku_summary.tsv` — per-genome summary with completeness, contamination, duplicate counts, and Pyrodigal gene statistics.
+- `checku_summary.tsv` — per-genome summary with raw completeness, calibrated completeness, contamination, duplicate counts, calibration provenance, and Pyrodigal gene statistics.
 - `details/checku_presence.tsv` — marker presence/absence matrix.
 - `details/hits/*.tsv` — raw pyhmmer hits with domain scores.
 - `checkpoint/checku_checkpoint.json` — resume data for interrupted runs.
@@ -185,6 +253,9 @@ pixi run python -m checku test
 
 The tables below summarize the expected `checku_summary.tsv` values for the bundled FAA and FNA test sets.
 Absolute paths (input/protein columns in the real table) are omitted for privacy.
+
+The real output table also includes `completeness_calibrated`, `calibration_domain`,
+`calibration_taxonomy_group`, `calibration_checku_bin`, and `calibration_n_train`.
 
 FAA (protein inputs):
 
