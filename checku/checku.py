@@ -11,6 +11,7 @@ genome, alongside detailed hit reports and JSON checkpoints for reproducibility.
 from __future__ import annotations
 
 import csv
+import multiprocessing as mp
 import gzip
 import json
 import logging
@@ -18,6 +19,7 @@ import os
 import shutil
 import sys
 import shlex
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -46,7 +48,7 @@ app = typer.Typer(
     context_settings={"allow_extra_args": True},
 )
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 
 def _data_roots() -> List[Path]:
@@ -317,6 +319,24 @@ class GenomeResult:
             raw_hits_path=data.get("raw_hits_path"),
             pyrodigal=data.get("pyrodigal"),
         )
+
+
+@dataclass
+class GenomeComputation:
+    """Intermediate per-genome result before calibration is applied."""
+
+    genome_id: str
+    input_path: str
+    input_type: str
+    proteins_path: str
+    markers_total: int
+    markers_detected: int
+    completeness: float
+    duplicated_markers: int
+    contamination: float
+    marker_summaries: Dict[str, MarkerSummary] = field(default_factory=dict)
+    raw_hits_path: Optional[str] = None
+    pyrodigal: Optional[Dict[str, object]] = None
 
 
 class Checkpoint:
@@ -632,6 +652,176 @@ class PyhmmerRunner:
         return marker_hits, raw_hits
 
 
+_WORKER_PYHMMER_RUNNER: Optional[PyhmmerRunner] = None
+_WORKER_PYRODIGAL_RUNNER: Optional[PyrodigalRunner] = None
+_WORKER_KEEP_INTERMEDIATE = True
+_WORKER_META_MODE = True
+_WORKER_TRANSLATION_TABLE: Optional[int] = None
+_WORKER_LOGGER: Optional[logging.Logger] = None
+
+
+def _worker_logger() -> logging.Logger:
+    logger = logging.getLogger(f"CheckU.worker.{os.getpid()}")
+    logger.handlers.clear()
+    logger.addHandler(logging.NullHandler())
+    logger.setLevel(logging.WARNING)
+    logger.propagate = False
+    return logger
+
+
+def _materialize_input_path(path: Path, work_dir: Path, genome_id: str) -> Path:
+    if path.suffix == ".gz":
+        target = work_dir / genome_id / path.with_suffix("").name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            with gzip.open(path, "rt", encoding="utf-8", errors="ignore") as src:
+                with open(target, "w", encoding="utf-8") as dst:
+                    shutil.copyfileobj(src, dst)
+        return target
+    return path
+
+
+def _write_raw_hits_file(
+    details_dir: Path,
+    genome_id: str,
+    raw_hits: List[Dict[str, object]],
+) -> Path:
+    hits_dir = details_dir / "hits"
+    hits_dir.mkdir(parents=True, exist_ok=True)
+    output_path = hits_dir / f"{genome_id}_checku_hits.tsv"
+    fieldnames = [
+        "marker",
+        "sequence",
+        "full_score",
+        "full_evalue",
+        "full_bias",
+        "domain_score",
+        "domain_evalue",
+        "domain_bias",
+        "hmm_from",
+        "hmm_to",
+        "ali_from",
+        "ali_to",
+        "env_from",
+        "env_to",
+    ]
+    with open(output_path, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader()
+        for record in raw_hits:
+            writer.writerow(record)
+    return output_path
+
+
+def _get_worker_pyrodigal_runner() -> PyrodigalRunner:
+    global _WORKER_PYRODIGAL_RUNNER
+    if _WORKER_PYRODIGAL_RUNNER is None:
+        if _WORKER_LOGGER is None:
+            raise RuntimeError("Worker logger has not been initialised.")
+        _WORKER_PYRODIGAL_RUNNER = PyrodigalRunner(
+            meta_mode=_WORKER_META_MODE,
+            translation_table=_WORKER_TRANSLATION_TABLE,
+            logger=_WORKER_LOGGER,
+        )
+    return _WORKER_PYRODIGAL_RUNNER
+
+
+def _init_parallel_worker(
+    hmm_path: str,
+    hmmsearch_cpus: int,
+    meta_mode: bool,
+    translation_table: Optional[int],
+    keep_intermediate: bool,
+) -> None:
+    global _WORKER_PYHMMER_RUNNER, _WORKER_PYRODIGAL_RUNNER, _WORKER_KEEP_INTERMEDIATE
+    global _WORKER_META_MODE, _WORKER_TRANSLATION_TABLE, _WORKER_LOGGER
+    logger = _worker_logger()
+    _WORKER_LOGGER = logger
+    _WORKER_PYHMMER_RUNNER = PyhmmerRunner(Path(hmm_path), hmmsearch_cpus, logger)
+    _WORKER_PYRODIGAL_RUNNER = None
+    _WORKER_KEEP_INTERMEDIATE = keep_intermediate
+    _WORKER_META_MODE = meta_mode
+    _WORKER_TRANSLATION_TABLE = translation_table
+
+
+def _process_file_in_worker(
+    fasta_path_str: str,
+    work_dir_str: str,
+    details_dir_str: str,
+) -> GenomeComputation:
+    if _WORKER_PYHMMER_RUNNER is None:
+        raise RuntimeError("Worker pyhmmer runner has not been initialised.")
+
+    fasta_path = Path(fasta_path_str)
+    work_dir = Path(work_dir_str)
+    details_dir = Path(details_dir_str)
+    genome_id = derive_genome_id(fasta_path)
+
+    materialized = _materialize_input_path(fasta_path, work_dir, genome_id)
+    sequence_type = detect_sequence_type(materialized)
+    if sequence_type == "unknown":
+        size = materialized.stat().st_size if materialized.exists() else None
+        if size == 0:
+            raise ValueError(f"{fasta_path} appears empty; expected FASTA sequences.")
+        raise ValueError(
+            f"Unable to determine sequence type for {fasta_path}. "
+            "Ensure the file contains nucleotide or amino-acid FASTA records."
+        )
+
+    proteins_path = materialized
+    pyrodigal_info: Optional[Dict[str, object]] = None
+    if sequence_type != "protein":
+        proteins_path = work_dir / genome_id / f"{genome_id}_predicted_proteins.faa"
+        pyrodigal_info = _get_worker_pyrodigal_runner().translate(
+            materialized, proteins_path
+        )
+
+    marker_hits, raw_hits = _WORKER_PYHMMER_RUNNER.search(proteins_path)
+    marker_total = _WORKER_PYHMMER_RUNNER.marker_count
+    markers_detected = len(
+        [summary for summary in marker_hits.values() if summary.hit_count > 0]
+    )
+    duplicated_markers = sum(
+        1 for summary in marker_hits.values() if summary.hit_count > 1
+    )
+    completeness = (
+        (markers_detected / marker_total) * 100
+        if _WORKER_PYHMMER_RUNNER.marker_order
+        else 0.0
+    )
+    contamination = (
+        (duplicated_markers / marker_total) * 100
+        if _WORKER_PYHMMER_RUNNER.marker_order
+        else 0.0
+    )
+
+    raw_hits_path: Optional[str] = None
+    if raw_hits:
+        raw_hits_path = str(
+            _write_raw_hits_file(details_dir=details_dir, genome_id=genome_id, raw_hits=raw_hits)
+        )
+
+    result = GenomeComputation(
+        genome_id=genome_id,
+        input_path=str(fasta_path),
+        input_type=sequence_type,
+        proteins_path=str(proteins_path),
+        markers_total=marker_total,
+        markers_detected=markers_detected,
+        completeness=round(completeness, 2),
+        duplicated_markers=duplicated_markers,
+        contamination=round(contamination, 2),
+        marker_summaries=marker_hits,
+        raw_hits_path=raw_hits_path,
+        pyrodigal=pyrodigal_info,
+    )
+
+    if not _WORKER_KEEP_INTERMEDIATE and proteins_path != materialized:
+        proteins_path.unlink(missing_ok=True)
+
+    return result
+
+
 @dataclass
 class RunConfig:
     """Configuration for the CheckU pipeline."""
@@ -643,6 +833,7 @@ class RunConfig:
     calibration_path: Path
     calibration_metadata_path: Optional[Path]
     cpus: int
+    genome_workers: int
     resume: bool
     fail_fast: bool
     meta_mode: bool
@@ -670,8 +861,25 @@ class CheckUPipeline:
         self.details_dir = config.output_dir / "details"
         self.details_dir.mkdir(parents=True, exist_ok=True)
         self.summary_path = config.output_dir / "checku_summary.tsv"
+        self.genome_workers = max(1, min(config.genome_workers, config.cpus))
+        self.hmmsearch_cpus = max(1, config.cpus // self.genome_workers)
+        if config.genome_workers != self.genome_workers:
+            self.logger.warning(
+                "Requested %d genome workers for %d total CPUs; using %d workers instead.",
+                config.genome_workers,
+                config.cpus,
+                self.genome_workers,
+            )
+        if config.cpus % self.genome_workers != 0:
+            self.logger.info(
+                "Distributing %d total CPUs across %d genome workers yields %d pyhmmer CPU(s) per worker; %d CPU(s) remain unused.",
+                config.cpus,
+                self.genome_workers,
+                self.hmmsearch_cpus,
+                config.cpus - (self.genome_workers * self.hmmsearch_cpus),
+            )
 
-        self.pyhmmer_runner = PyhmmerRunner(config.hmm_path, config.cpus, self.logger)
+        self.pyhmmer_runner = PyhmmerRunner(config.hmm_path, self.hmmsearch_cpus, self.logger)
         self.calibration_table = CalibrationTable(config.calibration_path, self.logger)
         self.calibration_metadata = CalibrationMetadata(
             config.calibration_metadata_path, self.logger
@@ -684,6 +892,12 @@ class CheckUPipeline:
             config.hmm_path,
             self.pyhmmer_runner.marker_count,
         )
+        self.logger.info(
+            "CPU plan: %d total CPU(s), %d genome worker(s), %d pyhmmer CPU(s) per worker.",
+            config.cpus,
+            self.genome_workers,
+            self.hmmsearch_cpus,
+        )
 
         self.pyrodigal_runner: Optional[PyrodigalRunner] = None
 
@@ -695,18 +909,67 @@ class CheckUPipeline:
                 logger=self.logger,
             )
 
-    def _materialize_input(self, path: Path, genome_id: str) -> Path:
-        if path.suffix == ".gz":
-            target = self.work_dir / genome_id / path.with_suffix("").name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if not target.exists():
-                self.logger.debug("Decompressing %s to %s.", path, target)
-                with gzip.open(path, "rt", encoding="utf-8", errors="ignore") as src:
-                    with open(target, "w", encoding="utf-8") as dst:
-                        shutil.copyfileobj(src, dst)
-            return target
+    def _write_raw_hits(self, genome_id: str, raw_hits: List[Dict[str, object]]) -> Path:
+        return _write_raw_hits_file(self.details_dir, genome_id, raw_hits)
 
-        return path
+    def _build_result(self, computation: GenomeComputation) -> GenomeResult:
+        calibrated_completeness, calibration_info = self.calibration_table.apply(
+            round(computation.completeness, 2),
+            self.calibration_metadata.lookup(computation.genome_id),
+        )
+        return GenomeResult(
+            genome_id=computation.genome_id,
+            input_path=computation.input_path,
+            input_type=computation.input_type,
+            proteins_path=computation.proteins_path,
+            markers_total=computation.markers_total,
+            markers_detected=computation.markers_detected,
+            completeness=round(computation.completeness, 2),
+            completeness_calibrated=(
+                round(calibrated_completeness, 2)
+                if calibrated_completeness is not None
+                else None
+            ),
+            duplicated_markers=computation.duplicated_markers,
+            contamination=round(computation.contamination, 2),
+            calibration_domain=(
+                "" if calibration_info is None else str(calibration_info["key"][0])
+            ),
+            calibration_taxonomy_group=(
+                "" if calibration_info is None else str(calibration_info["key"][1])
+            ),
+            calibration_checku_bin=(
+                "" if calibration_info is None else str(calibration_info["key"][2])
+            ),
+            calibration_n_train=(
+                None if calibration_info is None else int(calibration_info["n_samples"])
+            ),
+            marker_summaries=computation.marker_summaries,
+            raw_hits_path=computation.raw_hits_path,
+            pyrodigal=computation.pyrodigal,
+        )
+
+    def _log_success(self, result: GenomeResult) -> None:
+        self.logger.info(
+            "%s: %d/%d markers detected (%.2f%% raw completeness, %.2f%% calibrated completeness, %d duplicates, %.2f%% contamination).",
+            result.genome_id,
+            result.markers_detected,
+            result.markers_total,
+            result.completeness,
+            (
+                result.completeness_calibrated
+                if result.completeness_calibrated is not None
+                else result.completeness
+            ),
+            result.duplicated_markers,
+            result.contamination,
+        )
+
+    def _materialize_input(self, path: Path, genome_id: str) -> Path:
+        materialized = _materialize_input_path(path, self.work_dir, genome_id)
+        if materialized != path:
+            self.logger.debug("Decompressing %s to %s.", path, materialized)
+        return materialized
 
     def _collect_inputs(self) -> List[Path]:
         path = self.config.input_path
@@ -728,33 +991,6 @@ class CheckUPipeline:
                 "Supported suffixes include .faa, .fa, .fna, and gzipped equivalents."
             )
         return unique
-
-    def _write_raw_hits(self, genome_id: str, raw_hits: List[Dict[str, object]]) -> Path:
-        hits_dir = self.details_dir / "hits"
-        hits_dir.mkdir(parents=True, exist_ok=True)
-        output_path = hits_dir / f"{genome_id}_checku_hits.tsv"
-        fieldnames = [
-            "marker",
-            "sequence",
-            "full_score",
-            "full_evalue",
-            "full_bias",
-            "domain_score",
-            "domain_evalue",
-            "domain_bias",
-            "hmm_from",
-            "hmm_to",
-            "ali_from",
-            "ali_to",
-            "env_from",
-            "env_to",
-        ]
-        with open(output_path, "w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
-            writer.writeheader()
-            for record in raw_hits:
-                writer.writerow(record)
-        return output_path
 
     def _build_presence_table(self) -> List[Dict[str, object]]:
         rows: List[Dict[str, object]] = []
@@ -945,17 +1181,12 @@ class CheckUPipeline:
                 if self.marker_order
                 else 0.0
             )
-            calibrated_completeness, calibration_info = self.calibration_table.apply(
-                round(completeness, 2),
-                self.calibration_metadata.lookup(genome_id),
-            )
-
             raw_hits_path: Optional[str] = None
             if raw_hits:
                 hits_path = self._write_raw_hits(genome_id, raw_hits)
                 raw_hits_path = str(hits_path)
 
-            result = GenomeResult(
+            computation = GenomeComputation(
                 genome_id=genome_id,
                 input_path=str(fasta_path),
                 input_type=sequence_type,
@@ -963,45 +1194,16 @@ class CheckUPipeline:
                 markers_total=marker_total,
                 markers_detected=markers_detected,
                 completeness=round(completeness, 2),
-                completeness_calibrated=(
-                    round(calibrated_completeness, 2)
-                    if calibrated_completeness is not None
-                    else None
-                ),
                 duplicated_markers=duplicated_markers,
                 contamination=round(contamination, 2),
-                calibration_domain=(
-                    "" if calibration_info is None else str(calibration_info["key"][0])
-                ),
-                calibration_taxonomy_group=(
-                    "" if calibration_info is None else str(calibration_info["key"][1])
-                ),
-                calibration_checku_bin=(
-                    "" if calibration_info is None else str(calibration_info["key"][2])
-                ),
-                calibration_n_train=(
-                    None if calibration_info is None else int(calibration_info["n_samples"])
-                ),
                 marker_summaries=marker_hits,
                 raw_hits_path=raw_hits_path,
                 pyrodigal=pyrodigal_info,
             )
+            result = self._build_result(computation)
 
             self.checkpoint.record_success(result)
-            self.logger.info(
-                "%s: %d/%d markers detected (%.2f%% raw completeness, %.2f%% calibrated completeness, %d duplicates, %.2f%% contamination).",
-                genome_id,
-                markers_detected,
-                marker_total,
-                result.completeness,
-                (
-                    result.completeness_calibrated
-                    if result.completeness_calibrated is not None
-                    else result.completeness
-                ),
-                duplicated_markers,
-                result.contamination,
-            )
+            self._log_success(result)
 
             if not self.config.keep_intermediate and proteins_path != materialized:
                 try:
@@ -1019,13 +1221,80 @@ class CheckUPipeline:
             if self.config.fail_fast:
                 raise
 
+    def _run_parallel(self, inputs: List[Path]) -> None:
+        pending_inputs: List[Path] = []
+        for fasta_path in inputs:
+            genome_id = derive_genome_id(fasta_path)
+            if genome_id in self.checkpoint.records:
+                self.logger.info(
+                    "Skipping %s (already processed; use --no-resume to overwrite).",
+                    fasta_path,
+                )
+                continue
+            pending_inputs.append(fasta_path)
+
+        if not pending_inputs:
+            self.logger.info("All inputs are already present in the checkpoint.")
+            return
+
+        self.logger.info(
+            "Scheduling %d genomes across %d worker process(es) with %d pyhmmer CPU(s) per worker.",
+            len(pending_inputs),
+            self.genome_workers,
+            self.hmmsearch_cpus,
+        )
+
+        executor = ProcessPoolExecutor(
+            max_workers=self.genome_workers,
+            mp_context=mp.get_context("spawn"),
+            initializer=_init_parallel_worker,
+            initargs=(
+                str(self.config.hmm_path),
+                self.hmmsearch_cpus,
+                self.config.meta_mode,
+                self.config.translation_table,
+                self.config.keep_intermediate,
+            ),
+        )
+        futures = {
+            executor.submit(
+                _process_file_in_worker,
+                str(fasta_path),
+                str(self.work_dir),
+                str(self.details_dir),
+            ): fasta_path
+            for fasta_path in pending_inputs
+        }
+
+        try:
+            for future in as_completed(futures):
+                fasta_path = futures[future]
+                genome_id = derive_genome_id(fasta_path)
+                try:
+                    computation = future.result()
+                    result = self._build_result(computation)
+                    self.checkpoint.record_success(result)
+                    self._log_success(result)
+                except Exception as exc:
+                    self.logger.exception("Processing failed for %s: %s", fasta_path, exc)
+                    self.checkpoint.record_failure(genome_id, fasta_path, str(exc))
+                    if self.config.fail_fast:
+                        for pending in futures:
+                            pending.cancel()
+                        raise
+        finally:
+            executor.shutdown(wait=True, cancel_futures=self.config.fail_fast)
+
     def run(self) -> None:
         self.logger.debug("Collecting input FASTA files.")
         inputs = self._collect_inputs()
         self.logger.info("Found %d FASTA files to evaluate.", len(inputs))
 
-        for fasta_path in inputs:
-            self._process_file(fasta_path)
+        if self.genome_workers == 1:
+            for fasta_path in inputs:
+                self._process_file(fasta_path)
+        else:
+            self._run_parallel(inputs)
 
         self._export_presence_table()
 
@@ -1053,6 +1322,7 @@ def _run_pipeline(
     calibration_path: Path,
     calibration_metadata_path: Optional[Path],
     cpus: int,
+    genome_workers: int,
     resume: bool,
     fail_fast: bool,
     meta_mode: bool,
@@ -1077,6 +1347,7 @@ def _run_pipeline(
         calibration_path=calibration_path,
         calibration_metadata_path=calibration_metadata_path,
         cpus=cpus,
+        genome_workers=genome_workers,
         resume=resume,
         fail_fast=fail_fast,
         meta_mode=meta_mode,
@@ -1127,7 +1398,20 @@ def main(
         "--cpus",
         "-c",
         min=1,
-        help="Number of CPU cores to hand over to pyhmmer.",
+        help=(
+            "Total CPU budget for the run. When --genome-workers is greater than 1, "
+            "CheckU divides this budget across genome workers and pyhmmer threads per worker."
+        ),
+    ),
+    genome_workers: int = typer.Option(
+        1,
+        "--genome-workers",
+        "-j",
+        min=1,
+        help=(
+            "Number of genomes to process concurrently. Use values greater than 1 to "
+            "parallelize across bins; pyhmmer threads per worker are derived from --cpus."
+        ),
     ),
     resume: bool = typer.Option(
         True,
@@ -1188,6 +1472,7 @@ def main(
         calibration_path=calibration_path,
         calibration_metadata_path=calibration_metadata_path,
         cpus=cpus,
+        genome_workers=genome_workers,
         resume=resume,
         fail_fast=fail_fast,
         meta_mode=meta_mode,
@@ -1235,7 +1520,20 @@ def run(
         "--cpus",
         "-c",
         min=1,
-        help="Number of CPU cores to hand over to pyhmmer.",
+        help=(
+            "Total CPU budget for the run. When --genome-workers is greater than 1, "
+            "CheckU divides this budget across genome workers and pyhmmer threads per worker."
+        ),
+    ),
+    genome_workers: int = typer.Option(
+        1,
+        "--genome-workers",
+        "-j",
+        min=1,
+        help=(
+            "Number of genomes to process concurrently. Use values greater than 1 to "
+            "parallelize across bins; pyhmmer threads per worker are derived from --cpus."
+        ),
     ),
     resume: bool = typer.Option(
         True,
@@ -1282,6 +1580,7 @@ def run(
         calibration_path=calibration_path,
         calibration_metadata_path=calibration_metadata_path,
         cpus=cpus,
+        genome_workers=genome_workers,
         resume=resume,
         fail_fast=fail_fast,
         meta_mode=meta_mode,
@@ -1323,7 +1622,20 @@ def test(
         "--cpus",
         "-c",
         min=1,
-        help="Number of CPU cores to hand over to pyhmmer.",
+        help=(
+            "Total CPU budget for the run. When --genome-workers is greater than 1, "
+            "CheckU divides this budget across genome workers and pyhmmer threads per worker."
+        ),
+    ),
+    genome_workers: int = typer.Option(
+        1,
+        "--genome-workers",
+        "-j",
+        min=1,
+        help=(
+            "Number of genomes to process concurrently. Use values greater than 1 to "
+            "parallelize across bins; pyhmmer threads per worker are derived from --cpus."
+        ),
     ),
     resume: bool = typer.Option(
         True,
@@ -1380,6 +1692,7 @@ def test(
             calibration_path=calibration_path,
             calibration_metadata_path=None,
             cpus=cpus,
+            genome_workers=genome_workers,
             resume=resume,
             fail_fast=fail_fast,
             meta_mode=meta_mode,

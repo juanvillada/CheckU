@@ -121,6 +121,22 @@ checku run \
   --cpus 8
 ```
 
+For directories containing many bins, you can parallelize across genomes:
+
+```bash
+checku run \
+  bins_fna/ \
+  --output-dir tmp/high_throughput_batch \
+  --cpus 16 \
+  --genome-workers 16 \
+  --clean-intermediate
+```
+
+`--cpus` is the total CPU budget for the run. When `--genome-workers` is greater
+than `1`, CheckU divides that budget across concurrent genome workers and
+pyhmmer threads per worker. For large directories of MAGs, this is usually much
+faster than processing one genome at a time.
+
 ### Single assembly
 
 ```bash
